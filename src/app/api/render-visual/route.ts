@@ -46,10 +46,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const refinementInstructions =
+      typeof body?.refinementInstructions === "string"
+        ? body.refinementInstructions.trim()
+        : "";
+
+    let userPrompt = buildRenderingUserPrompt(spec);
+    if (refinementInstructions) {
+      userPrompt += `\n\nThe user has provided additional refinement instructions for this visual. Apply these adjustments:\n${refinementInstructions}`;
+    }
+
     const response = await requestOpenRouterText({
       apiKey,
       systemPrompt: RENDERING_SYSTEM_PROMPT,
-      userPrompt: buildRenderingUserPrompt(spec),
+      userPrompt,
       maxTokens: 12000,
       primaryModel: PRIMARY_MODEL,
       fallbackModel: FALLBACK_MODEL,

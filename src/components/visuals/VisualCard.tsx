@@ -12,7 +12,7 @@ interface Props {
   copyFeedback?: string;
   onCopyVisual: () => void;
   onCopyHtml: () => void;
-  onRegenerate: () => void;
+  onRegenerate: (refinementInstructions?: string) => void;
 }
 
 function RenderVisualContent({
@@ -52,6 +52,8 @@ export function VisualCard({
   onRegenerate,
 }: Props) {
   const [previewHeight, setPreviewHeight] = useState(240);
+  const [showFineTune, setShowFineTune] = useState(false);
+  const [fineTuneText, setFineTuneText] = useState("");
 
   useEffect(() => {
     if (item.status !== "ready") {
@@ -157,6 +159,36 @@ export function VisualCard({
         ) : null}
       </div>
 
+      {showFineTune && (
+        <div className="border-t border-[#e2e8f0] bg-[#fafaf9] px-5 py-3">
+          <div className="mb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-[#6B7280]">
+            Fine-tune instructions
+          </div>
+          <div className="flex gap-2">
+            <input
+              type="text"
+              value={fineTuneText}
+              onChange={(e) => setFineTuneText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && fineTuneText.trim()) {
+                  onRegenerate(fineTuneText.trim());
+                }
+              }}
+              placeholder="e.g. Make the font darker, enlarge the title, use bolder colors..."
+              className="min-w-0 flex-1 rounded-lg border border-[#e2e8f0] bg-white px-3 py-2 text-[13px] text-[#1A1C22] outline-none placeholder:text-[#9CA3AF] focus:border-[#E8503A]/50 focus:ring-2 focus:ring-[#E8503A]/10"
+            />
+            <button
+              type="button"
+              disabled={!fineTuneText.trim() || isRendering}
+              onClick={() => onRegenerate(fineTuneText.trim())}
+              className="shrink-0 rounded-full bg-[#1A1C22] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-white transition hover:bg-[#252830] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isRendering ? "Rendering..." : "Apply"}
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="flex items-center justify-between gap-4 border-t border-[#e2e8f0] bg-[#f8fafc] px-5 py-3">
         <div className="flex items-center gap-3">
           <button
@@ -169,10 +201,21 @@ export function VisualCard({
           </button>
           <button
             type="button"
-            onClick={onRegenerate}
+            onClick={() => onRegenerate()}
             className="rounded-full border border-[#e2e8f0] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-[#6B7280] transition hover:border-[#E8503A]/30 hover:text-[#1A1C22]"
           >
             {isRendering ? "Rendering..." : "Regenerate"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowFineTune(!showFineTune)}
+            className={`rounded-full border px-4 py-2 text-[11px] font-medium uppercase tracking-[0.12em] transition ${
+              showFineTune
+                ? "border-[#E8503A]/30 bg-[#E8503A]/5 text-[#E8503A]"
+                : "border-[#e2e8f0] text-[#6B7280] hover:border-[#E8503A]/30 hover:text-[#1A1C22]"
+            }`}
+          >
+            Fine-tune
           </button>
         </div>
 

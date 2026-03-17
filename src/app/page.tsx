@@ -118,7 +118,7 @@ export default function Home() {
   );
 
   const renderSpec = useCallback(
-    async (spec: VisualSpec, runId: number) => {
+    async (spec: VisualSpec, runId: number, refinementInstructions?: string) => {
       if (spec.type === "scorecard") {
         updateItem(spec.id, {
           status: "ready",
@@ -140,7 +140,7 @@ export default function Home() {
         const response = await fetch("/api/render-visual", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ spec }),
+          body: JSON.stringify({ spec, refinementInstructions }),
         });
 
         const payload = await response.json();
@@ -345,13 +345,13 @@ export default function Home() {
   );
 
   const handleRegenerate = useCallback(
-    async (id: string) => {
+    async (id: string, refinementInstructions?: string) => {
       const target = items.find((item) => item.spec.id === id);
       if (!target) {
         return;
       }
 
-      await renderSpec(target.spec, activeBatchRef.current);
+      await renderSpec(target.spec, activeBatchRef.current, refinementInstructions);
     },
     [items, renderSpec]
   );

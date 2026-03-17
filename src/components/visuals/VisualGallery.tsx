@@ -10,7 +10,7 @@ interface Props {
   getCaptureRef: (id: string) => RefObject<HTMLDivElement | null>;
   onCopyVisual: (id: string) => void;
   onCopyHtml: (id: string) => void;
-  onRegenerate: (id: string) => void;
+  onRegenerate: (id: string, refinementInstructions?: string) => void;
   onRegenerateAll: () => void;
   onReExtract: () => void;
   isRenderingBatch: boolean;
@@ -81,7 +81,7 @@ export function VisualGallery({
               copyFeedback={copyFeedback[item.spec.id]}
               onCopyVisual={() => onCopyVisual(item.spec.id)}
               onCopyHtml={() => onCopyHtml(item.spec.id)}
-              onRegenerate={() => onRegenerate(item.spec.id)}
+              onRegenerate={(instructions?: string) => onRegenerate(item.spec.id, instructions)}
             />
           ))}
         </div>
