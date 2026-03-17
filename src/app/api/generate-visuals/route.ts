@@ -66,12 +66,12 @@ export async function POST(request: NextRequest) {
       return res;
     };
 
-    let model = "anthropic/claude-sonnet-4-6";
+    let model = "anthropic/claude-opus-4-6";
     let response = await makeRequest(model);
 
     if (!response.ok) {
       console.warn(`Primary model failed (${response.status}), trying fallback...`);
-      model = "anthropic/claude-haiku-4-5";
+      model = "anthropic/claude-sonnet-4-5";
       response = await makeRequest(model);
     }
 

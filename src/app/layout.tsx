@@ -14,8 +14,8 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Innovera Chapter Enhancer",
-  description: "Transform raw chapter drafts into polished, structured content",
+  title: "Innovera Chapter Visuals",
+  description: "Generate investment-grade chapter visuals with a two-pass AI workflow",
 };
 
 export default function RootLayout({

@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
 
     const systemPrompt = `${BASE_OUTPUT_RULES}\n\n${CHAPTER_PROMPTS[chapterType]}`;
 
-    let model = "anthropic/claude-sonnet-4-6";
+    let model = "anthropic/claude-opus-4-6";
     let usedFallback = false;
 
     const makeRequest = async (modelId: string) => {

@@ -1,4 +1,20 @@
+export const CHAPTER_TYPE_OPTIONS = [
+  { id: "opportunity-validation", label: "Opportunity Validation" },
+  { id: "market-research", label: "Market Research" },
+  { id: "competitive-analysis", label: "Competitive Analysis" },
+  { id: "executive-summary", label: "Executive Summary" },
+] as const;
+
+export type ChapterType = (typeof CHAPTER_TYPE_OPTIONS)[number]["id"];
+
+export const VALID_CHAPTER_TYPES = CHAPTER_TYPE_OPTIONS.map((option) => option.id);
+
+export function isChapterType(value: string): value is ChapterType {
+  return VALID_CHAPTER_TYPES.includes(value as ChapterType);
+}
+
 export type VisualType =
+  | "scorecard"
   | "horizontal_bar"
   | "vertical_bar"
   | "stacked_bar"
@@ -12,7 +28,6 @@ export type VisualType =
   | "comparison_strip"
   | "two_by_two"
   | "layered_diagram"
-  | "scorecard"
   | "heatmap_table";
 
 export interface VisualSpec {
@@ -25,7 +40,15 @@ export interface VisualSpec {
   insight?: string;
 }
 
-// Data schemas for each visual type
+export type VisualRenderStatus = "idle" | "rendering" | "ready" | "error";
+
+export interface RenderedVisual {
+  spec: VisualSpec;
+  deterministic: boolean;
+  html: string | null;
+  status: VisualRenderStatus;
+  error: string | null;
+}
 
 export interface HorizontalBarData {
   bars: Array<{
@@ -36,8 +59,8 @@ export interface HorizontalBarData {
   }>;
   xAxisLabel?: string;
   showValues: boolean;
-  maxValue?: number;
   highlightIndex?: number;
+  maxValue?: number;
 }
 
 export interface VerticalBarData {
@@ -113,12 +136,12 @@ export interface FlowDiagramData {
   steps: Array<{
     label: string;
     sublabel?: string;
-    status?: "complete" | "current" | "pending" | "missing";
+    status: "complete" | "current" | "pending" | "missing";
     icon?: string;
   }>;
   direction: "horizontal" | "vertical";
-  connectorLabel?: string;
   flowType: "linear" | "branching";
+  connectorLabel?: string;
 }
 
 export interface TimelineData {
@@ -146,9 +169,15 @@ export interface GaugeData {
 export interface ComparisonStripData {
   pairs: Array<{
     label: string;
-    before: { value: string; sublabel?: string };
-    after: { value: string; sublabel?: string };
-    changeLabel?: string;
+    before: {
+      value: string;
+      sublabel?: string;
+    };
+    after: {
+      value: string;
+      sublabel?: string;
+    };
+    changeLabel: string;
     changeType: "positive" | "negative" | "neutral";
   }>;
 }
@@ -163,7 +192,7 @@ export interface TwoByTwoData {
     size?: number;
     color?: string;
   }>;
-  quadrantLabels?: {
+  quadrantLabels: {
     topLeft: string;
     topRight: string;
     bottomLeft: string;

@@ -1,332 +1,599 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import {
+  createRef,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type RefObject,
+} from "react";
+import { toBlob } from "html-to-image";
+import { VisualGallery } from "@/components/visuals/VisualGallery";
+import { VISUAL_CANVAS_WIDTH } from "@/lib/design-system";
 import { SAMPLE_TEXTS } from "@/lib/samples";
+import {
+  CHAPTER_TYPE_OPTIONS,
+  type ChapterType,
+  type RenderedVisual,
+  type VisualSpec,
+} from "@/lib/visual-types";
 
-const CHAPTER_TYPES = [
-  { id: "opportunity-validation", label: "Opportunity Validation" },
-  { id: "market-research", label: "Market Research" },
-  { id: "competitive-analysis", label: "Competitive Analysis" },
-  { id: "executive-summary", label: "Executive Summary" },
-] as const;
+const MAX_CONCURRENT_RENDERS = 4;
+const MIN_CHARACTERS = 200;
+const MAX_CHARACTERS = 80000;
 
-type ChapterType = (typeof CHAPTER_TYPES)[number]["id"];
+async function runWithConcurrency<T>(
+  values: T[],
+  limit: number,
+  worker: (value: T) => Promise<void>
+) {
+  let index = 0;
+
+  const runners = Array.from({ length: Math.min(limit, values.length) }, async () => {
+    while (index < values.length) {
+      const currentIndex = index;
+      index += 1;
+      await worker(values[currentIndex]);
+    }
+  });
+
+  await Promise.all(runners);
+}
 
 export default function Home() {
-  const [selectedChapter, setSelectedChapter] = useState<ChapterType>("opportunity-validation");
-  const [inputText, setInputText] = useState("");
-  const [outputHtml, setOutputHtml] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [chapterType, setChapterType] = useState<ChapterType>("opportunity-validation");
+  const [chapterText, setChapterText] = useState("");
+  const [items, setItems] = useState<RenderedVisual[]>([]);
   const [error, setError] = useState("");
-  const [viewMode, setViewMode] = useState<"preview" | "source">("preview");
-  const [copyFeedback, setCopyFeedback] = useState("");
-  const previewRef = useRef<HTMLDivElement>(null);
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [isRenderingBatch, setIsRenderingBatch] = useState(false);
+  const [copyFeedback, setCopyFeedback] = useState<Record<string, string>>({});
 
-  const handleEnhance = async () => {
-    setError("");
-    setOutputHtml("");
-    setIsLoading(true);
+  const activeBatchRef = useRef(0);
+  const captureRefs = useRef<Record<string, RefObject<HTMLDivElement | null>>>({});
+  const feedbackTimers = useRef<Record<string, number>>({});
 
-    try {
-      const res = await fetch("/api/enhance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chapterType: selectedChapter,
-          inputText,
-        }),
+  useEffect(() => {
+    return () => {
+      Object.values(feedbackTimers.current).forEach((timer) => window.clearTimeout(timer));
+    };
+  }, []);
+
+  const getCaptureRef = useCallback((id: string) => {
+    if (!captureRefs.current[id]) {
+      captureRefs.current[id] = createRef<HTMLDivElement>();
+    }
+
+    return captureRefs.current[id];
+  }, []);
+
+  const setTransientFeedback = useCallback((id: string, message: string) => {
+    if (feedbackTimers.current[id]) {
+      window.clearTimeout(feedbackTimers.current[id]);
+    }
+
+    setCopyFeedback((current) => ({ ...current, [id]: message }));
+
+    feedbackTimers.current[id] = window.setTimeout(() => {
+      setCopyFeedback((current) => ({ ...current, [id]: "" }));
+    }, 2200);
+  }, []);
+
+  const updateItem = useCallback((id: string, patch: Partial<RenderedVisual>) => {
+    setItems((current) =>
+      current.map((item) =>
+        item.spec.id === id
+          ? {
+              ...item,
+              ...patch,
+            }
+          : item
+      )
+    );
+  }, []);
+
+  const ensureRefsForSpecs = useCallback(
+    (specs: VisualSpec[]) => {
+      specs.forEach((spec) => {
+        getCaptureRef(spec.id);
       });
+    },
+    [getCaptureRef]
+  );
 
-      const data = await res.json();
+  const createInitialItems = useCallback(
+    (specs: VisualSpec[]): RenderedVisual[] => {
+      ensureRefsForSpecs(specs);
 
-      if (!res.ok) {
-        setError(data.error || "Something went wrong.");
+      return specs.map((spec) => ({
+        spec,
+        deterministic: spec.type === "scorecard",
+        html: null,
+        status: spec.type === "scorecard" ? "ready" : "rendering",
+        error: null,
+      }));
+    },
+    [ensureRefsForSpecs]
+  );
+
+  const renderSpec = useCallback(
+    async (spec: VisualSpec, runId: number) => {
+      if (spec.type === "scorecard") {
+        updateItem(spec.id, {
+          status: "ready",
+          error: null,
+          html: null,
+          deterministic: true,
+        });
         return;
       }
 
-      setOutputHtml(data.html);
-      setViewMode("preview");
-    } catch {
-      setError("Failed to connect to the server. Please try again.");
-    } finally {
-      setIsLoading(false);
+      updateItem(spec.id, {
+        status: "rendering",
+        error: null,
+        html: null,
+        deterministic: false,
+      });
+
+      try {
+        const response = await fetch("/api/render-visual", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spec }),
+        });
+
+        const payload = await response.json();
+
+        if (runId !== activeBatchRef.current) {
+          return;
+        }
+
+        if (!response.ok || typeof payload.html !== "string") {
+          throw new Error(payload.error || "Render failed. Click Regenerate to try again.");
+        }
+
+        updateItem(spec.id, {
+          html: payload.html,
+          status: "ready",
+          error: null,
+          deterministic: false,
+        });
+      } catch (renderError) {
+        if (runId !== activeBatchRef.current) {
+          return;
+        }
+
+        updateItem(spec.id, {
+          html: null,
+          status: "error",
+          error:
+            renderError instanceof Error
+              ? renderError.message
+              : "Render failed. Click Regenerate to try again.",
+          deterministic: false,
+        });
+      }
+    },
+    [updateItem]
+  );
+
+  const renderBatch = useCallback(
+    async (specs: VisualSpec[], runId: number) => {
+      const aiSpecs = specs.filter((spec) => spec.type !== "scorecard");
+
+      setIsRenderingBatch(aiSpecs.length > 0);
+
+      if (!aiSpecs.length) {
+        return;
+      }
+
+      await runWithConcurrency(aiSpecs, MAX_CONCURRENT_RENDERS, async (spec) => {
+        if (runId !== activeBatchRef.current) {
+          return;
+        }
+
+        await renderSpec(spec, runId);
+      });
+
+      if (runId === activeBatchRef.current) {
+        setIsRenderingBatch(false);
+      }
+    },
+    [renderSpec]
+  );
+
+  const handleGenerate = useCallback(async () => {
+    const trimmed = chapterText.trim();
+
+    if (trimmed.length < MIN_CHARACTERS) {
+      setError(`Paste at least ${MIN_CHARACTERS} characters before generating visuals.`);
+      return;
     }
-  };
 
-  const handleLoadSample = () => {
-    setInputText(SAMPLE_TEXTS[selectedChapter] || "");
-  };
+    if (trimmed.length > MAX_CHARACTERS) {
+      setError("Chapter text too long, try pasting one chapter at a time.");
+      return;
+    }
 
-  const showCopyFeedback = (msg: string) => {
-    setCopyFeedback(msg);
-    setTimeout(() => setCopyFeedback(""), 2000);
-  };
+    const runId = activeBatchRef.current + 1;
+    activeBatchRef.current = runId;
 
-  const handleCopyRichHtml = useCallback(async () => {
-    if (!previewRef.current) return;
+    setError("");
+    setItems([]);
+    setIsExtracting(true);
+    setIsRenderingBatch(false);
+
     try {
-      const html = previewRef.current.innerHTML;
-      const blob = new Blob([html], { type: "text/html" });
-      const textBlob = new Blob([html], { type: "text/plain" });
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          "text/html": blob,
-          "text/plain": textBlob,
+      const response = await fetch("/api/extract-visuals", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          chapterType,
+          chapterText: trimmed,
         }),
-      ]);
-      showCopyFeedback("Rich HTML copied!");
-    } catch {
-      showCopyFeedback("Copy failed. Try Copy Source instead.");
-    }
-  }, []);
+      });
 
-  const handleCopySource = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(outputHtml);
-      showCopyFeedback("Source HTML copied!");
-    } catch {
-      showCopyFeedback("Copy failed.");
-    }
-  }, [outputHtml]);
+      const payload = await response.json();
 
-  const hasOutput = outputHtml.length > 0;
+      if (runId !== activeBatchRef.current) {
+        return;
+      }
+
+      if (!response.ok) {
+        throw new Error(payload.error || "Extraction failed, try again.");
+      }
+
+      const visuals = Array.isArray(payload.visuals) ? (payload.visuals as VisualSpec[]) : [];
+
+      if (!visuals.length) {
+        setError("No visualisable data found in this chapter.");
+        return;
+      }
+
+      setItems(createInitialItems(visuals));
+      setIsExtracting(false);
+
+      void renderBatch(visuals, runId);
+    } catch (extractError) {
+      if (runId !== activeBatchRef.current) {
+        return;
+      }
+
+      setError(
+        extractError instanceof Error ? extractError.message : "Extraction failed, try again."
+      );
+    } finally {
+      if (runId === activeBatchRef.current) {
+        setIsExtracting(false);
+      }
+    }
+  }, [chapterText, chapterType, createInitialItems, renderBatch]);
+
+  const handleLoadSample = useCallback(() => {
+    setChapterText(SAMPLE_TEXTS[chapterType]);
+    setError("");
+  }, [chapterType]);
+
+  const handleCopyVisual = useCallback(
+    async (id: string) => {
+      const captureRef = getCaptureRef(id);
+
+      if (!captureRef.current) {
+        setTransientFeedback(id, "Render first");
+        return;
+      }
+
+      try {
+        setCopyFeedback((current) => ({ ...current, [id]: "Rendering..." }));
+
+        const blob = await toBlob(captureRef.current, {
+          pixelRatio: 2,
+          backgroundColor: "#ffffff",
+          width: VISUAL_CANVAS_WIDTH,
+        });
+
+        if (!blob) {
+          throw new Error("Render failed");
+        }
+
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "image/png": blob,
+          }),
+        ]);
+
+        setTransientFeedback(id, "Copied PNG");
+      } catch {
+        setTransientFeedback(id, "Copy failed");
+      }
+    },
+    [getCaptureRef, setTransientFeedback]
+  );
+
+  const handleCopyHtml = useCallback(
+    async (id: string) => {
+      const item = items.find((candidate) => candidate.spec.id === id);
+      if (!item) {
+        return;
+      }
+
+      const captureRef = getCaptureRef(id);
+      const html =
+        item.html ??
+        (item.deterministic && captureRef.current ? captureRef.current.innerHTML : "");
+
+      if (!html) {
+        setTransientFeedback(id, "No HTML yet");
+        return;
+      }
+
+      try {
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            "text/html": new Blob([html], { type: "text/html" }),
+            "text/plain": new Blob([html], { type: "text/plain" }),
+          }),
+        ]);
+
+        setTransientFeedback(id, "Copied HTML");
+      } catch {
+        setTransientFeedback(id, "Copy failed");
+      }
+    },
+    [getCaptureRef, items, setTransientFeedback]
+  );
+
+  const handleRegenerate = useCallback(
+    async (id: string) => {
+      const target = items.find((item) => item.spec.id === id);
+      if (!target) {
+        return;
+      }
+
+      await renderSpec(target.spec, activeBatchRef.current);
+    },
+    [items, renderSpec]
+  );
+
+  const handleRegenerateAll = useCallback(() => {
+    if (!items.length) {
+      return;
+    }
+
+    const runId = activeBatchRef.current + 1;
+    activeBatchRef.current = runId;
+
+    const specs = items.map((item) => item.spec);
+    setItems(createInitialItems(specs));
+    void renderBatch(specs, runId);
+  }, [createInitialItems, items, renderBatch]);
+
+  const helperText =
+    chapterText.trim().length < MIN_CHARACTERS
+      ? `Add ${MIN_CHARACTERS - chapterText.trim().length} more characters to enable generation.`
+      : chapterText.trim().length > MAX_CHARACTERS
+        ? "This chapter is above the 80,000 character limit."
+        : isExtracting
+          ? "Analysing chapter and extracting visual data..."
+          : isRenderingBatch
+            ? "Pass 2 is generating bespoke visuals. Cards will resolve one by one."
+            : "Generate visual specs first, then copy the visuals you want as PNGs.";
 
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-50 bg-bg-dark border-b border-white/[0.07] px-6 py-3 flex items-center gap-3">
-        <svg width="36" height="36" viewBox="0 0 36 36" fill="none">
-          <rect width="36" height="36" fill="#E8503A" />
-          <polygon points="18,8 30,28 6,28" fill="white" />
-        </svg>
-        <span
-          className="text-text-light font-[var(--font-body)] text-sm tracking-[0.12em] font-medium"
-          style={{ fontFamily: "var(--font-body)" }}
-        >
-          INNOVERA
-        </span>
-        <span className="text-text-muted text-sm ml-2">/ Chapter Enhancer</span>
-        <div className="flex-1" />
-        <a
-          href="/visuals"
-          className="text-xs text-text-muted hover:text-text-light tracking-[0.04em] transition-colors"
-        >
-          Chapter Visuals
-        </a>
+    <div className="min-h-screen bg-white text-[#1A1C22]">
+      <header className="sticky top-0 z-40 border-b border-white/10 bg-[#1A1C22]/95 backdrop-blur">
+        <div className="mx-auto flex max-w-7xl items-center gap-4 px-6 py-4 sm:px-8">
+          <svg width="36" height="36" viewBox="0 0 36 36" fill="none" aria-hidden="true">
+            <rect width="36" height="36" fill="#E8503A" />
+            <polygon points="18,8 30,28 6,28" fill="white" />
+          </svg>
+          <div className="min-w-0">
+            <div className="text-[13px] font-medium uppercase tracking-[0.24em] text-white">
+              INNOVERA
+            </div>
+            <div className="text-[12px] text-[#9CA3AF]">Chapter Visuals</div>
+          </div>
+          <div className="ml-auto text-right text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">
+            two-pass extraction + rendering
+          </div>
+        </div>
       </header>
 
-      {/* Main Content */}
-      <main className="flex-1 flex flex-col lg:flex-row">
-        {/* Left Panel - Input */}
-        <div
-          className={`${
-            hasOutput ? "lg:w-[480px] lg:min-w-[480px]" : "w-full max-w-3xl mx-auto"
-          } bg-bg-light p-8 flex flex-col gap-6 transition-all`}
+      <main>
+        <section
+          className="relative overflow-hidden border-b border-[#eadfd9]"
+          style={{
+            background:
+              "radial-gradient(circle at top right, rgba(232,80,58,0.14), transparent 28%), linear-gradient(180deg, #F5F0EC 0%, #f8f3ef 100%)",
+          }}
         >
-          {/* Section marker */}
-          <div className="flex items-center gap-2">
-            <span className="text-primary font-medium text-sm" style={{ fontFamily: "var(--font-body)" }}>
-              //
-            </span>
-            <span className="text-text-label text-xs tracking-[0.1em] font-medium uppercase">
-              CHAPTER TYPE
-            </span>
-          </div>
-
-          {/* Chapter Type Selector */}
-          <div className="flex flex-wrap gap-2">
-            {CHAPTER_TYPES.map((ct) => (
-              <button
-                key={ct.id}
-                onClick={() => setSelectedChapter(ct.id)}
-                className={`px-4 py-2 rounded-full text-sm font-medium tracking-[0.02em] transition-all border ${
-                  selectedChapter === ct.id
-                    ? "border-primary bg-primary/10 text-primary"
-                    : "border-black/[0.08] bg-white text-text-dark hover:border-primary/30"
-                }`}
-                style={{ fontFamily: "var(--font-body)" }}
-              >
-                {ct.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Section marker */}
-          <div className="flex items-center gap-2 mt-2">
-            <span className="text-primary font-medium text-sm">
-              //
-            </span>
-            <span className="text-text-label text-xs tracking-[0.1em] font-medium uppercase">
-              INPUT TEXT
-            </span>
-          </div>
-
-          {/* Input Area */}
-          <textarea
-            value={inputText}
-            onChange={(e) => setInputText(e.target.value)}
-            placeholder="Paste your executive summary or chapter draft text here..."
-            className="w-full flex-1 min-h-[300px] bg-white border border-black/[0.08] rounded-lg p-5 text-text-dark text-sm leading-relaxed resize-none focus:outline-none focus:border-primary/40 focus:ring-2 focus:ring-primary/10 placeholder:text-text-muted"
-            style={{ fontFamily: "var(--font-body)" }}
-          />
-
-          {/* Character count */}
-          <div className="flex items-center justify-between">
-            <span className="text-text-label text-xs">
-              {inputText.length.toLocaleString()} / 50,000 characters
-            </span>
-            <button
-              onClick={handleLoadSample}
-              className="text-xs text-primary hover:text-primary-hover font-medium tracking-[0.02em] transition-colors"
-              style={{ fontFamily: "var(--font-body)" }}
-            >
-              Load Sample
-            </button>
-          </div>
-
-          {/* Error Message */}
-          {error && (
-            <div className="bg-red-50 border border-red-200 text-red-700 rounded-lg px-4 py-3 text-sm">
-              {error}
-            </div>
-          )}
-
-          {/* Status: why button is disabled or that we're processing */}
-          <div className="min-h-[20px]" aria-live="polite" aria-atomic="true">
-            {isLoading && (
-              <p className="text-primary text-sm font-medium flex items-center gap-2">
-                <span className="inline-block w-4 h-4 border-2 border-primary border-t-transparent rounded-full animate-spin" aria-hidden />
-                Sending to AI… This usually takes 30–90 seconds.
-              </p>
-            )}
-            {!isLoading && inputText.length > 0 && inputText.length < 100 && (
-              <p className="text-text-label text-sm">
-                Add at least {100 - inputText.length} more character{100 - inputText.length !== 1 ? "s" : ""} to enable Enhance.
-              </p>
-            )}
-          </div>
-
-          {/* CTA Button */}
-          <button
-            onClick={handleEnhance}
-            disabled={isLoading || inputText.length < 100}
-            className="w-full bg-primary hover:bg-primary-hover disabled:opacity-50 disabled:cursor-not-allowed text-text-light py-3 px-6 rounded-full text-sm font-medium tracking-[0.08em] uppercase transition-all"
-            style={{ fontFamily: "var(--font-body)" }}
-          >
-            {isLoading ? "Enhancing…" : "Enhance Chapter"}
-          </button>
-        </div>
-
-        {/* Right Panel - Output */}
-        {(hasOutput || isLoading) && (
-          <div className="flex-1 flex flex-col bg-bg-dark border-l border-white/[0.07]">
-            {/* Output Toolbar */}
-            <div className="flex items-center justify-between px-6 py-3 border-b border-white/[0.07]">
+          <div className="mx-auto grid max-w-7xl gap-10 px-6 py-10 sm:px-8 lg:grid-cols-[minmax(0,1.2fr)_340px] lg:items-start lg:gap-12 lg:py-14">
+            <div>
               <div className="flex items-center gap-2">
-                <span className="text-primary font-medium text-sm">//</span>
-                <span className="text-text-label text-xs tracking-[0.1em] font-medium uppercase">
-                  OUTPUT
+                <span className="text-[14px] font-medium text-[#E8503A]">//</span>
+                <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
+                  Internal Tool
                 </span>
               </div>
 
-              <div className="flex items-center gap-3">
-                {/* View Toggle */}
-                {hasOutput && (
-                  <div className="flex rounded-full border border-white/[0.07] overflow-hidden">
-                    <button
-                      onClick={() => setViewMode("preview")}
-                      className={`px-3 py-1.5 text-xs font-medium tracking-[0.04em] transition-colors ${
-                        viewMode === "preview"
-                          ? "bg-card-dark text-text-light"
-                          : "text-text-muted hover:text-text-light"
-                      }`}
-                    >
-                      Preview
-                    </button>
-                    <button
-                      onClick={() => setViewMode("source")}
-                      className={`px-3 py-1.5 text-xs font-medium tracking-[0.04em] transition-colors ${
-                        viewMode === "source"
-                          ? "bg-card-dark text-text-light"
-                          : "text-text-muted hover:text-text-light"
-                      }`}
-                    >
-                      Source
-                    </button>
+              <h1
+                className="mt-5 max-w-4xl text-[40px] leading-[0.96] text-[#1A1C22] sm:text-[52px] lg:text-[62px]"
+                style={{ fontFamily: "var(--font-heading)" }}
+              >
+                Turn finished memo chapters into a gallery of copy-ready visuals.
+              </h1>
+
+              <p className="mt-5 max-w-3xl text-[15px] leading-7 text-[#6B7280] sm:text-[16px]">
+                Pass 1 extracts the strongest chart and diagram opportunities from the chapter.
+                Pass 2 renders each visual individually so every card gets a bespoke spatial
+                treatment instead of a template.
+              </p>
+
+              <div className="mt-8 rounded-[18px] border border-[#eadfd9] bg-white/75 p-5 shadow-[0_18px_50px_rgba(26,28,34,0.06)] backdrop-blur">
+                <div className="grid gap-6">
+                  <div>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="text-[14px] font-medium text-[#E8503A]">//</span>
+                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
+                        Chapter Type
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {CHAPTER_TYPE_OPTIONS.map((option) => (
+                        <button
+                          key={option.id}
+                          type="button"
+                          onClick={() => setChapterType(option.id)}
+                          className={`rounded-full border px-4 py-2 text-[12px] font-medium uppercase tracking-[0.08em] transition ${
+                            chapterType === option.id
+                              ? "border-[#E8503A] bg-[#E8503A] text-white"
+                              : "border-black/10 bg-white text-[#1A1C22] hover:border-[#E8503A]/40"
+                          }`}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </div>
                   </div>
-                )}
 
-                {/* Copy Buttons */}
-                {hasOutput && (
-                  <>
-                    <button
-                      onClick={handleCopyRichHtml}
-                      className="px-3 py-1.5 rounded-full border border-primary/40 text-primary text-xs font-medium tracking-[0.04em] hover:bg-primary/10 transition-colors"
-                    >
-                      Copy Rich HTML
-                    </button>
-                    <button
-                      onClick={handleCopySource}
-                      className="px-3 py-1.5 rounded-full border border-white/[0.12] text-text-muted text-xs font-medium tracking-[0.04em] hover:text-text-light hover:border-white/[0.2] transition-colors"
-                    >
-                      Copy Source
-                    </button>
-                  </>
-                )}
+                  <div>
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="text-[14px] font-medium text-[#E8503A]">//</span>
+                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
+                        Chapter Text
+                      </span>
+                    </div>
 
-                {/* Copy Feedback */}
-                {copyFeedback && (
-                  <span className="text-green-400 text-xs font-medium animate-pulse">
-                    {copyFeedback}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Output Content */}
-            <div className="flex-1 overflow-auto p-6">
-              {isLoading && !hasOutput ? (
-                <div className="flex flex-col items-center justify-center min-h-[280px] gap-6">
-                  <div className="flex flex-col items-center gap-3">
-                    <span
-                      className="inline-block w-10 h-10 border-2 border-primary border-t-transparent rounded-full animate-spin"
-                      aria-hidden
+                    <textarea
+                      value={chapterText}
+                      onChange={(event) => {
+                        setChapterText(event.target.value);
+                        if (error) {
+                          setError("");
+                        }
+                      }}
+                      placeholder="Paste the completed chapter text here. The more concrete numbers and sequences it contains, the stronger the extracted visuals will be."
+                      className="min-h-[320px] w-full resize-y rounded-[16px] border border-black/10 bg-white px-5 py-4 text-[15px] leading-7 text-[#1A1C22] outline-none transition placeholder:text-[#9CA3AF] focus:border-[#E8503A]/50 focus:ring-2 focus:ring-[#E8503A]/10"
                     />
-                    <h3 className="text-text-light font-semibold text-lg" style={{ fontFamily: "var(--font-body)" }}>
-                      Enhancing your chapter
-                    </h3>
-                    <p className="text-text-muted text-sm text-center max-w-sm">
-                      The AI is building tables, structure, and visuals. This usually takes 30–90 seconds.
-                    </p>
-                  </div>
-                  <div className="space-y-4 w-full max-w-xl">
-                    {[...Array(6)].map((_, i) => (
-                      <div key={i} className="skeleton-pulse">
-                        <div
-                          className="bg-card-dark rounded-lg"
-                          style={{
-                            height: i === 0 ? 36 : i % 3 === 0 ? 80 : 18,
-                            width: i === 0 ? "50%" : i % 2 === 0 ? "100%" : "88%",
-                          }}
-                        />
+
+                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="flex flex-wrap items-center gap-3 text-[12px] uppercase tracking-[0.12em] text-[#6B7280]">
+                        <span>{chapterText.trim().length.toLocaleString()} characters</span>
+                        <button
+                          type="button"
+                          onClick={handleLoadSample}
+                          className="font-medium text-[#E8503A] transition hover:text-[#D4432E]"
+                        >
+                          Load sample
+                        </button>
                       </div>
-                    ))}
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        {items.length > 0 ? (
+                          <button
+                            type="button"
+                            onClick={handleGenerate}
+                            className="rounded-full border border-[#e2e8f0] px-5 py-3 text-[11px] font-medium uppercase tracking-[0.14em] text-[#6B7280] transition hover:border-[#E8503A]/30 hover:text-[#1A1C22]"
+                          >
+                            Re-Extract
+                          </button>
+                        ) : null}
+
+                        <button
+                          type="button"
+                          onClick={handleGenerate}
+                          disabled={isExtracting || chapterText.trim().length < MIN_CHARACTERS}
+                          className="rounded-full bg-[#E8503A] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.16em] text-white transition hover:bg-[#D4432E] disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {isExtracting ? "Extracting..." : "Generate Visuals"}
+                        </button>
+                      </div>
+                    </div>
                   </div>
                 </div>
-              ) : viewMode === "preview" ? (
-                <div
-                  ref={previewRef}
-                  className="bg-white rounded-lg p-8 shadow-lg"
-                  dangerouslySetInnerHTML={{ __html: outputHtml }}
-                />
-              ) : (
-                <pre className="bg-card-dark rounded-lg p-6 text-text-muted text-xs leading-relaxed overflow-auto whitespace-pre-wrap break-all font-mono">
-                  {outputHtml}
-                </pre>
-              )}
+              </div>
+
+              {error ? (
+                <div className="mt-5 rounded-[14px] border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-[14px] text-[#991b1b]">
+                  {error}
+                </div>
+              ) : null}
             </div>
+
+            <aside className="rounded-[20px] bg-[#1A1C22] p-6 text-white shadow-[0_25px_60px_rgba(26,28,34,0.18)]">
+              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#9CA3AF]">
+                Generation status
+              </div>
+              <div className="mt-4 text-[28px] leading-none" style={{ fontFamily: "var(--font-heading)" }}>
+                {isExtracting ? "Pass 1" : isRenderingBatch ? "Pass 2" : items.length ? "Ready" : "Waiting"}
+              </div>
+              <p className="mt-4 text-[14px] leading-7 text-[#d1d5db]">{helperText}</p>
+
+              <div className="mt-8 space-y-4 border-t border-white/10 pt-6">
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Visual rules</div>
+                  <div className="mt-2 text-[14px] leading-7 text-white">
+                    Scorecards stay deterministic. Everything else is AI-rendered as self-contained
+                    HTML and copied as crisp PNGs.
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Input limits</div>
+                  <div className="mt-2 text-[14px] leading-7 text-white">
+                    Minimum {MIN_CHARACTERS} characters. Maximum {MAX_CHARACTERS.toLocaleString()}.
+                  </div>
+                </div>
+                <div>
+                  <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Copy mode</div>
+                  <div className="mt-2 text-[14px] leading-7 text-white">
+                    PNG is the default path. HTML copy is available when the editor can accept rich
+                    markup directly.
+                  </div>
+                </div>
+              </div>
+            </aside>
           </div>
-        )}
+        </section>
+
+        {isExtracting && !items.length ? (
+          <section className="bg-white px-6 py-10 sm:px-8 lg:px-10">
+            <div className="mx-auto max-w-7xl">
+              <div className="mb-8 flex items-center gap-3 text-[14px] text-[#6B7280]">
+                <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#E8503A] border-t-transparent" />
+                Analysing chapter and extracting visual data...
+              </div>
+
+              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+                {Array.from({ length: 4 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="skeleton-pulse rounded-[12px] border border-[#e2e8f0] bg-white p-5"
+                    style={{ boxShadow: "0 12px 32px rgba(15, 23, 42, 0.05)" }}
+                  >
+                    <div className="h-3 w-24 rounded-full bg-[#f1f5f9]" />
+                    <div className="mt-3 h-5 w-2/3 rounded-full bg-[#f1f5f9]" />
+                    <div className="mt-6 h-[260px] rounded-[14px] bg-[#f8fafc]" />
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {items.length ? (
+          <VisualGallery
+            items={items}
+            copyFeedback={copyFeedback}
+            getCaptureRef={getCaptureRef}
+            onCopyVisual={handleCopyVisual}
+            onCopyHtml={handleCopyHtml}
+            onRegenerate={handleRegenerate}
+            onRegenerateAll={handleRegenerateAll}
+            onReExtract={handleGenerate}
+            isRenderingBatch={isRenderingBatch}
+          />
+        ) : null}
       </main>
     </div>
   );

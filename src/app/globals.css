@@ -17,13 +17,13 @@
 
 body {
   font-family: var(--font-body);
-  background: var(--color-bg-dark);
-  color: var(--color-text-light);
+  background: #ffffff;
+  color: var(--color-text-dark);
 }
 
 @keyframes pulse-skeleton {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.7; }
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 0.92; }
 }
 
 .skeleton-pulse {

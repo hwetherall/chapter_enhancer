@@ -1,4 +1,5 @@
 import { forwardRef } from "react";
+import { VISUAL_CANVAS_WIDTH, VISUAL_COLORS, VISUAL_FONT_FAMILY, VISUAL_WRAPPER_PADDING } from "@/lib/design-system";
 import type { ScorecardData } from "@/lib/visual-types";
 
 interface Props {
@@ -8,217 +9,275 @@ interface Props {
   insight?: string;
 }
 
-const STATUS_ACCENT: Record<string, string> = {
-  positive: "#059669",
-  warning: "#d97706",
-  negative: "#dc2626",
-  neutral: "#64748b",
+const STATUS_ACCENT: Record<ScorecardData["metrics"][number]["status"], string> = {
+  positive: VISUAL_COLORS.green,
+  warning: VISUAL_COLORS.amber,
+  negative: VISUAL_COLORS.red,
+  neutral: VISUAL_COLORS.grey,
 };
 
-const TREND_CHAR: Record<string, string> = {
-  up: "▲",
-  down: "▼",
-  flat: "—",
+const TREND_CHAR: Record<NonNullable<ScorecardData["metrics"][number]["trend"]>, string> = {
+  up: "\u25B2",
+  down: "\u25BC",
+  flat: "-",
 };
 
 export const ScorecardVisual = forwardRef<HTMLDivElement, Props>(
   ({ data, title, caption, insight }, ref) => {
     const { metrics, columns = 4 } = data;
-    const cols = Math.min(columns, 4);
-    const heroMetrics = metrics.slice(0, cols);
-    const supportMetrics = metrics.slice(cols);
+    const heroColumns = Math.min(Math.max(columns, 1), 4);
+    const heroMetrics = metrics.slice(0, heroColumns);
+    const supportMetrics = metrics.slice(heroColumns);
 
     return (
       <div
         ref={ref}
         style={{
-          fontFamily: "'Georgia', 'Times New Roman', serif",
-          maxWidth: 720,
-          padding: "28px 32px",
-          backgroundColor: "#ffffff",
+          fontFamily: VISUAL_FONT_FAMILY,
+          maxWidth: VISUAL_CANVAS_WIDTH,
+          padding: VISUAL_WRAPPER_PADDING,
+          backgroundColor: VISUAL_COLORS.white,
         }}
       >
-        {/* Title with accent bar */}
-        <div style={{ display: "flex", alignItems: "flex-start", gap: 12, marginBottom: 6 }}>
-          <div style={{ width: 3, height: 22, backgroundColor: "#2563eb", borderRadius: 2, marginTop: 2, flexShrink: 0 }} />
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 12 }}>
+          <div
+            style={{
+              width: 3,
+              minHeight: 28,
+              borderRadius: 999,
+              backgroundColor: VISUAL_COLORS.blue,
+              flexShrink: 0,
+              marginTop: 2,
+            }}
+          />
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: "#0f172a", letterSpacing: "-0.01em", lineHeight: 1.3 }}>{title}</div>
-            {caption && <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 3, fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif", fontStyle: "italic" }}>{caption}</div>}
+            <div
+              style={{
+                fontSize: 16,
+                fontWeight: 700,
+                color: VISUAL_COLORS.navy,
+                lineHeight: 1.35,
+              }}
+            >
+              {title}
+            </div>
+            {caption ? (
+              <div
+                style={{
+                  marginTop: 4,
+                  fontSize: 12,
+                  color: VISUAL_COLORS.greyLight,
+                  fontStyle: "italic",
+                  lineHeight: 1.4,
+                }}
+              >
+                {caption}
+              </div>
+            ) : null}
           </div>
         </div>
 
-        {/* Hero metrics — dark strip */}
         <div
           style={{
             display: "grid",
-            gridTemplateColumns: `repeat(${cols}, 1fr)`,
-            backgroundColor: "#0f172a",
-            borderRadius: supportMetrics.length > 0 ? "8px 8px 0 0" : 8,
-            marginTop: 20,
+            gridTemplateColumns: `repeat(${heroMetrics.length || 1}, minmax(0, 1fr))`,
+            marginTop: 24,
+            backgroundColor: VISUAL_COLORS.navy,
+            borderRadius: supportMetrics.length > 0 ? "12px 12px 0 0" : 12,
             overflow: "hidden",
           }}
         >
-          {heroMetrics.map((metric, i) => {
-            const accent = STATUS_ACCENT[metric.status] || STATUS_ACCENT.neutral;
+          {heroMetrics.map((metric, index) => {
+            const accentColor = STATUS_ACCENT[metric.status];
             const trend = metric.trend ? TREND_CHAR[metric.trend] : null;
+
             return (
               <div
-                key={i}
+                key={`${metric.label}-${index}`}
                 style={{
                   padding: "22px 20px 18px",
-                  borderRight: i < cols - 1 ? "1px solid rgba(255,255,255,0.06)" : "none",
-                  position: "relative",
+                  borderRight:
+                    index < heroMetrics.length - 1 ? "1px solid rgba(255,255,255,0.08)" : "none",
                 }}
               >
-                {/* Accent dot */}
-                <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
-                  <div style={{ width: 6, height: 6, borderRadius: "50%", backgroundColor: accent, flexShrink: 0 }} />
-                  <div style={{
-                    fontSize: 9,
-                    fontWeight: 500,
-                    color: "rgba(255,255,255,0.4)",
-                    textTransform: "uppercase" as const,
-                    letterSpacing: "0.1em",
-                    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                    lineHeight: 1,
-                  }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                  <span
+                    style={{
+                      width: 6,
+                      height: 6,
+                      borderRadius: "50%",
+                      backgroundColor: accentColor,
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span
+                    style={{
+                      fontSize: 9,
+                      fontWeight: 600,
+                      letterSpacing: "0.14em",
+                      textTransform: "uppercase",
+                      color: "rgba(255,255,255,0.55)",
+                    }}
+                  >
                     {metric.label}
-                  </div>
+                  </span>
                 </div>
 
-                <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
-                  <span style={{
-                    fontSize: 30,
-                    fontWeight: 700,
-                    color: "#ffffff",
-                    letterSpacing: "-0.03em",
-                    lineHeight: 1,
-                    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                  }}>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+                  <span
+                    style={{
+                      fontSize: 30,
+                      fontWeight: 700,
+                      lineHeight: 1,
+                      color: VISUAL_COLORS.white,
+                    }}
+                  >
                     {metric.value}
                   </span>
-                  {trend && (
-                    <span style={{
-                      fontSize: 9,
-                      color: accent,
-                      fontWeight: 700,
-                      fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                    }}>
+                  {trend ? (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        fontWeight: 700,
+                        color: accentColor,
+                      }}
+                    >
                       {trend}
                     </span>
-                  )}
+                  ) : null}
                 </div>
 
-                {metric.sublabel && (
-                  <div style={{
-                    fontSize: 11,
-                    color: "rgba(255,255,255,0.35)",
-                    marginTop: 6,
-                    lineHeight: 1.3,
-                    fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                  }}>
+                {metric.sublabel ? (
+                  <div
+                    style={{
+                      marginTop: 8,
+                      fontSize: 11,
+                      lineHeight: 1.35,
+                      color: "rgba(255,255,255,0.45)",
+                    }}
+                  >
                     {metric.sublabel}
                   </div>
-                )}
+                ) : null}
               </div>
             );
           })}
         </div>
 
-        {/* Supporting metrics — light strip */}
-        {supportMetrics.length > 0 && (
+        {supportMetrics.length > 0 ? (
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: `repeat(${Math.min(cols, supportMetrics.length)}, 1fr)`,
-              backgroundColor: "#f8fafc",
-              borderRadius: "0 0 8px 8px",
-              border: "1px solid #e2e8f0",
+              gridTemplateColumns: `repeat(${Math.min(heroColumns, supportMetrics.length)}, minmax(0, 1fr))`,
+              backgroundColor: VISUAL_COLORS.card,
+              border: `1px solid ${VISUAL_COLORS.border}`,
               borderTop: "none",
+              borderRadius: "0 0 12px 12px",
               overflow: "hidden",
             }}
           >
-            {supportMetrics.map((metric, i) => {
-              const accent = STATUS_ACCENT[metric.status] || STATUS_ACCENT.neutral;
+            {supportMetrics.map((metric, index) => {
+              const accentColor = STATUS_ACCENT[metric.status];
               const trend = metric.trend ? TREND_CHAR[metric.trend] : null;
+              const columnsInRow = Math.min(heroColumns, supportMetrics.length);
+
               return (
                 <div
-                  key={i}
+                  key={`${metric.label}-${index}`}
                   style={{
-                    padding: "18px 20px 14px",
-                    borderRight: i < Math.min(cols, supportMetrics.length) - 1 ? "1px solid #e2e8f0" : "none",
+                    padding: "18px 20px 16px",
+                    borderRight: index < columnsInRow - 1 ? `1px solid ${VISUAL_COLORS.border}` : "none",
                   }}
                 >
-                  <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                    <div style={{ width: 5, height: 5, borderRadius: "50%", backgroundColor: accent, flexShrink: 0 }} />
-                    <div style={{
-                      fontSize: 9,
-                      fontWeight: 500,
-                      color: "#94a3b8",
-                      textTransform: "uppercase" as const,
-                      letterSpacing: "0.1em",
-                      fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                      lineHeight: 1,
-                    }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                    <span
+                      style={{
+                        width: 6,
+                        height: 6,
+                        borderRadius: "50%",
+                        backgroundColor: accentColor,
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 600,
+                        letterSpacing: "0.14em",
+                        textTransform: "uppercase",
+                        color: VISUAL_COLORS.greyLight,
+                      }}
+                    >
                       {metric.label}
-                    </div>
+                    </span>
                   </div>
 
-                  <div style={{ display: "flex", alignItems: "baseline", gap: 5 }}>
-                    <span style={{
-                      fontSize: 22,
-                      fontWeight: 700,
-                      color: "#0f172a",
-                      letterSpacing: "-0.02em",
-                      lineHeight: 1,
-                      fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                    }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    <span
+                      style={{
+                        fontSize: 22,
+                        fontWeight: 700,
+                        lineHeight: 1,
+                        color: VISUAL_COLORS.navy,
+                      }}
+                    >
                       {metric.value}
                     </span>
-                    {trend && (
-                      <span style={{
-                        fontSize: 8,
-                        color: accent,
-                        fontWeight: 700,
-                        fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                      }}>
+                    {trend ? (
+                      <span
+                        style={{
+                          fontSize: 9,
+                          fontWeight: 700,
+                          color: accentColor,
+                        }}
+                      >
                         {trend}
                       </span>
-                    )}
+                    ) : null}
                   </div>
 
-                  {metric.sublabel && (
-                    <div style={{
-                      fontSize: 11,
-                      color: "#94a3b8",
-                      marginTop: 4,
-                      lineHeight: 1.3,
-                      fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-                    }}>
+                  {metric.sublabel ? (
+                    <div
+                      style={{
+                        marginTop: 6,
+                        fontSize: 11,
+                        lineHeight: 1.35,
+                        color: VISUAL_COLORS.greyLight,
+                      }}
+                    >
                       {metric.sublabel}
                     </div>
-                  )}
+                  ) : null}
                 </div>
               );
             })}
           </div>
-        )}
+        ) : null}
 
-        {insight && (
-          <div style={{
-            fontSize: 12,
-            color: "#64748b",
-            marginTop: 16,
-            paddingTop: 12,
-            borderTop: "1px solid #f1f5f9",
-            fontFamily: "system-ui, -apple-system, 'Segoe UI', sans-serif",
-            lineHeight: 1.5,
-          }}>
-            <span style={{ fontWeight: 600, color: "#475569", fontSize: 9, letterSpacing: "0.08em", textTransform: "uppercase" as const }}>INSIGHT</span>
-            <br />
-            {insight}
+        {insight ? (
+          <div
+            style={{
+              marginTop: 16,
+              paddingTop: 12,
+              borderTop: `1px solid ${VISUAL_COLORS.panel}`,
+              color: VISUAL_COLORS.grey,
+              lineHeight: 1.5,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 9,
+                fontWeight: 700,
+                letterSpacing: "0.14em",
+                textTransform: "uppercase",
+                color: VISUAL_COLORS.textSecondary,
+              }}
+            >
+              Insight
+            </div>
+            <div style={{ marginTop: 4, fontSize: 12 }}>{insight}</div>
           </div>
-        )}
+        ) : null}
       </div>
     );
   }
