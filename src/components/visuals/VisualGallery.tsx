@@ -14,6 +14,7 @@ interface Props {
   onRegenerateAll: () => void;
   onReExtract: () => void;
   isRenderingBatch: boolean;
+  reExtractLabel?: string;
 }
 
 export function VisualGallery({
@@ -26,6 +27,7 @@ export function VisualGallery({
   onRegenerateAll,
   onReExtract,
   isRenderingBatch,
+  reExtractLabel = "Re-Extract",
 }: Props) {
   return (
     <section className="bg-white px-6 py-10 sm:px-8 lg:px-10">
@@ -55,7 +57,7 @@ export function VisualGallery({
               onClick={onReExtract}
               className="rounded-full border border-[#e2e8f0] px-4 py-2 text-[11px] font-medium uppercase tracking-[0.12em] text-[#6B7280] transition hover:border-[#E8503A]/30 hover:text-[#1A1C22]"
             >
-              Re-Extract
+              {reExtractLabel}
             </button>
             <button
               type="button"

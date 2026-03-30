@@ -11,7 +11,7 @@ import {
 import { toBlob } from "html-to-image";
 import { VisualGallery } from "@/components/visuals/VisualGallery";
 import { VISUAL_CANVAS_WIDTH } from "@/lib/design-system";
-import { SAMPLE_TEXTS } from "@/lib/samples";
+import { SAMPLE_TEXTS, STRUCTURED_JSON_SAMPLE } from "@/lib/samples";
 import {
   CHAPTER_TYPE_OPTIONS,
   type ChapterType,
@@ -22,6 +22,12 @@ import {
 const MAX_CONCURRENT_RENDERS = 4;
 const MIN_CHARACTERS = 200;
 const MAX_CHARACTERS = 80000;
+const INPUT_MODE_OPTIONS = [
+  { id: "chapter-text", label: "Chapter Text" },
+  { id: "structured-json", label: "Structured JSON" },
+] as const;
+
+type InputMode = (typeof INPUT_MODE_OPTIONS)[number]["id"];
 
 async function runWithConcurrency<T>(
   values: T[],
@@ -42,8 +48,10 @@ async function runWithConcurrency<T>(
 }
 
 export default function Home() {
+  const [inputMode, setInputMode] = useState<InputMode>("chapter-text");
   const [chapterType, setChapterType] = useState<ChapterType>("opportunity-validation");
   const [chapterText, setChapterText] = useState("");
+  const [structuredJson, setStructuredJson] = useState("");
   const [items, setItems] = useState<RenderedVisual[]>([]);
   const [error, setError] = useState("");
   const [isExtracting, setIsExtracting] = useState(false);
@@ -204,15 +212,21 @@ export default function Home() {
   );
 
   const handleGenerate = useCallback(async () => {
-    const trimmed = chapterText.trim();
+    const trimmedChapterText = chapterText.trim();
+    const trimmedStructuredJson = structuredJson.trim();
 
-    if (trimmed.length < MIN_CHARACTERS) {
-      setError(`Paste at least ${MIN_CHARACTERS} characters before generating visuals.`);
-      return;
-    }
+    if (inputMode === "chapter-text") {
+      if (trimmedChapterText.length < MIN_CHARACTERS) {
+        setError(`Paste at least ${MIN_CHARACTERS} characters before generating visuals.`);
+        return;
+      }
 
-    if (trimmed.length > MAX_CHARACTERS) {
-      setError("Chapter text too long, try pasting one chapter at a time.");
+      if (trimmedChapterText.length > MAX_CHARACTERS) {
+        setError("Chapter text too long, try pasting one chapter at a time.");
+        return;
+      }
+    } else if (!trimmedStructuredJson) {
+      setError("Paste a structured JSON payload before generating visuals.");
       return;
     }
 
@@ -225,14 +239,22 @@ export default function Home() {
     setIsRenderingBatch(false);
 
     try {
-      const response = await fetch("/api/extract-visuals", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          chapterType,
-          chapterText: trimmed,
-        }),
-      });
+      const response = await fetch(
+        inputMode === "chapter-text"
+          ? "/api/extract-visuals"
+          : "/api/ingest-structured-visuals",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body:
+            inputMode === "chapter-text"
+              ? JSON.stringify({
+                  chapterType,
+                  chapterText: trimmedChapterText,
+                })
+              : trimmedStructuredJson,
+        }
+      );
 
       const payload = await response.json();
 
@@ -247,7 +269,11 @@ export default function Home() {
       const visuals = Array.isArray(payload.visuals) ? (payload.visuals as VisualSpec[]) : [];
 
       if (!visuals.length) {
-        setError("No visualisable data found in this chapter.");
+        setError(
+          inputMode === "chapter-text"
+            ? "No visualisable data found in this chapter."
+            : "The structured payload did not produce any renderable visuals."
+        );
         return;
       }
 
@@ -261,19 +287,27 @@ export default function Home() {
       }
 
       setError(
-        extractError instanceof Error ? extractError.message : "Extraction failed, try again."
+        extractError instanceof Error
+          ? extractError.message
+          : inputMode === "chapter-text"
+            ? "Extraction failed, try again."
+            : "Structured visual ingestion failed, try again."
       );
     } finally {
       if (runId === activeBatchRef.current) {
         setIsExtracting(false);
       }
     }
-  }, [chapterText, chapterType, createInitialItems, renderBatch]);
+  }, [chapterText, chapterType, createInitialItems, inputMode, renderBatch, structuredJson]);
 
   const handleLoadSample = useCallback(() => {
-    setChapterText(SAMPLE_TEXTS[chapterType]);
+    if (inputMode === "chapter-text") {
+      setChapterText(SAMPLE_TEXTS[chapterType]);
+    } else {
+      setStructuredJson(STRUCTURED_JSON_SAMPLE);
+    }
     setError("");
-  }, [chapterType]);
+  }, [chapterType, inputMode]);
 
   const handleCopyVisual = useCallback(
     async (id: string) => {
@@ -369,16 +403,27 @@ export default function Home() {
     void renderBatch(specs, runId);
   }, [createInitialItems, items, renderBatch]);
 
+  const activeInputLength =
+    inputMode === "chapter-text" ? chapterText.trim().length : structuredJson.trim().length;
+
   const helperText =
-    chapterText.trim().length < MIN_CHARACTERS
-      ? `Add ${MIN_CHARACTERS - chapterText.trim().length} more characters to enable generation.`
-      : chapterText.trim().length > MAX_CHARACTERS
-        ? "This chapter is above the 80,000 character limit."
+    inputMode === "chapter-text"
+      ? chapterText.trim().length < MIN_CHARACTERS
+        ? `Add ${MIN_CHARACTERS - chapterText.trim().length} more characters to enable generation.`
+        : chapterText.trim().length > MAX_CHARACTERS
+          ? "This chapter is above the 80,000 character limit."
+          : isExtracting
+            ? "Analysing chapter and extracting visual data..."
+            : isRenderingBatch
+              ? "Pass 2 is generating bespoke visuals. Cards will resolve one by one."
+              : "Generate visual specs first, then copy the visuals you want as PNGs."
+      : !structuredJson.trim().length
+        ? "Paste upstream structured JSON or slightly messy JSON-ish output for Risk Matrix and/or Strategic Fit vs Scalability."
         : isExtracting
-          ? "Analysing chapter and extracting visual data..."
+          ? "Cleaning, validating, and preparing structured visual specs..."
           : isRenderingBatch
             ? "Pass 2 is generating bespoke visuals. Cards will resolve one by one."
-            : "Generate visual specs first, then copy the visuals you want as PNGs.";
+            : "Structured JSON is the preferred path for these upstream-scored visuals, and messy payloads can be auto-cleaned.";
 
   return (
     <div className="min-h-screen bg-white text-[#1A1C22]">
@@ -388,17 +433,19 @@ export default function Home() {
             <rect width="36" height="36" fill="#E8503A" />
             <polygon points="18,8 30,28 6,28" fill="white" />
           </svg>
-          <div className="min-w-0">
-            <div className="text-[13px] font-medium uppercase tracking-[0.24em] text-white">
-              INNOVERA
+            <div className="min-w-0">
+              <div className="text-[13px] font-medium uppercase tracking-[0.24em] text-white">
+                INNOVERA
+              </div>
+              <div className="text-[12px] text-[#9CA3AF]">Visual Builder</div>
             </div>
-            <div className="text-[12px] text-[#9CA3AF]">Chapter Visuals</div>
+            <div className="ml-auto text-right text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">
+              {inputMode === "chapter-text"
+                ? "two-pass extraction + rendering"
+                : "structured ingest + rendering"}
+            </div>
           </div>
-          <div className="ml-auto text-right text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">
-            two-pass extraction + rendering
-          </div>
-        </div>
-      </header>
+        </header>
 
       <main>
         <section
@@ -424,95 +471,142 @@ export default function Home() {
                 Turn finished memo chapters into a gallery of copy-ready visuals.
               </h1>
 
-              <p className="mt-5 max-w-3xl text-[15px] leading-7 text-[#6B7280] sm:text-[16px]">
-                Pass 1 extracts the strongest chart and diagram opportunities from the chapter.
-                Pass 2 renders each visual individually so every card gets a bespoke spatial
-                treatment instead of a template.
-              </p>
+                <p className="mt-5 max-w-3xl text-[15px] leading-7 text-[#6B7280] sm:text-[16px]">
+                  Use chapter text for broad visual extraction, or paste structured upstream JSON
+                  when Risk Matrix and Strategic Fit vs Scalability are already scored. Pass 2
+                  still renders each visual individually so every card gets a bespoke spatial
+                  treatment instead of a template.
+                </p>
 
-              <div className="mt-8 rounded-[18px] border border-[#eadfd9] bg-white/75 p-5 shadow-[0_18px_50px_rgba(26,28,34,0.06)] backdrop-blur">
-                <div className="grid gap-6">
-                  <div>
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="text-[14px] font-medium text-[#E8503A]">//</span>
-                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
-                        Chapter Type
-                      </span>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {CHAPTER_TYPE_OPTIONS.map((option) => (
-                        <button
-                          key={option.id}
-                          type="button"
-                          onClick={() => setChapterType(option.id)}
-                          className={`rounded-full border px-4 py-2 text-[12px] font-medium uppercase tracking-[0.08em] transition ${
-                            chapterType === option.id
-                              ? "border-[#E8503A] bg-[#E8503A] text-white"
-                              : "border-black/10 bg-white text-[#1A1C22] hover:border-[#E8503A]/40"
-                          }`}
-                        >
-                          {option.label}
+                <div className="mt-8 rounded-[18px] border border-[#eadfd9] bg-white/75 p-5 shadow-[0_18px_50px_rgba(26,28,34,0.06)] backdrop-blur">
+                  <div className="grid gap-6">
+                    <div>
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="text-[14px] font-medium text-[#E8503A]">//</span>
+                        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
+                          Input Mode
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {INPUT_MODE_OPTIONS.map((option) => (
+                          <button
+                            key={option.id}
+                            type="button"
+                            onClick={() => setInputMode(option.id)}
+                            className={`rounded-full border px-4 py-2 text-[12px] font-medium uppercase tracking-[0.08em] transition ${
+                              inputMode === option.id
+                                ? "border-[#E8503A] bg-[#E8503A] text-white"
+                                : "border-black/10 bg-white text-[#1A1C22] hover:border-[#E8503A]/40"
+                            }`}
+                          >
+                            {option.label}
                         </button>
                       ))}
-                    </div>
-                  </div>
-
-                  <div>
-                    <div className="mb-3 flex items-center gap-2">
-                      <span className="text-[14px] font-medium text-[#E8503A]">//</span>
-                      <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
-                        Chapter Text
-                      </span>
+                      </div>
                     </div>
 
-                    <textarea
-                      value={chapterText}
-                      onChange={(event) => {
-                        setChapterText(event.target.value);
-                        if (error) {
-                          setError("");
-                        }
-                      }}
-                      placeholder="Paste the completed chapter text here. The more concrete numbers and sequences it contains, the stronger the extracted visuals will be."
-                      className="min-h-[320px] w-full resize-y rounded-[16px] border border-black/10 bg-white px-5 py-4 text-[15px] leading-7 text-[#1A1C22] outline-none transition placeholder:text-[#9CA3AF] focus:border-[#E8503A]/50 focus:ring-2 focus:ring-[#E8503A]/10"
-                    />
+                    {inputMode === "chapter-text" ? (
+                      <div>
+                        <div className="mb-3 flex items-center gap-2">
+                          <span className="text-[14px] font-medium text-[#E8503A]">//</span>
+                          <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
+                            Chapter Type
+                          </span>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {CHAPTER_TYPE_OPTIONS.map((option) => (
+                            <button
+                              key={option.id}
+                              type="button"
+                              onClick={() => setChapterType(option.id)}
+                              className={`rounded-full border px-4 py-2 text-[12px] font-medium uppercase tracking-[0.08em] transition ${
+                                chapterType === option.id
+                                  ? "border-[#E8503A] bg-[#E8503A] text-white"
+                                  : "border-black/10 bg-white text-[#1A1C22] hover:border-[#E8503A]/40"
+                              }`}
+                            >
+                              {option.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
 
-                    <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="flex flex-wrap items-center gap-3 text-[12px] uppercase tracking-[0.12em] text-[#6B7280]">
-                        <span>{chapterText.trim().length.toLocaleString()} characters</span>
-                        <button
-                          type="button"
-                          onClick={handleLoadSample}
-                          className="font-medium text-[#E8503A] transition hover:text-[#D4432E]"
-                        >
-                          Load sample
-                        </button>
+                    <div>
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="text-[14px] font-medium text-[#E8503A]">//</span>
+                        <span className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#6B7280]">
+                          {inputMode === "chapter-text" ? "Chapter Text" : "Structured JSON"}
+                        </span>
                       </div>
 
-                      <div className="flex flex-wrap items-center gap-3">
-                        {items.length > 0 ? (
+                      <textarea
+                        value={inputMode === "chapter-text" ? chapterText : structuredJson}
+                        onChange={(event) => {
+                          if (inputMode === "chapter-text") {
+                            setChapterText(event.target.value);
+                          } else {
+                            setStructuredJson(event.target.value);
+                          }
+
+                          if (error) {
+                            setError("");
+                          }
+                        }}
+                        placeholder={
+                          inputMode === "chapter-text"
+                            ? "Paste the completed chapter text here. The more concrete numbers and sequences it contains, the stronger the extracted visuals will be."
+                            : 'Paste the upstream JSON-ish payload here. Clean JSON, a single visual object, or slightly messy model output can all be cleaned and normalized.'
+                        }
+                        className="min-h-[320px] w-full resize-y rounded-[16px] border border-black/10 bg-white px-5 py-4 text-[15px] leading-7 text-[#1A1C22] outline-none transition placeholder:text-[#9CA3AF] focus:border-[#E8503A]/50 focus:ring-2 focus:ring-[#E8503A]/10"
+                        spellCheck={false}
+                      />
+
+                      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="flex flex-wrap items-center gap-3 text-[12px] uppercase tracking-[0.12em] text-[#6B7280]">
+                          <span>{activeInputLength.toLocaleString()} characters</span>
+                          <button
+                            type="button"
+                            onClick={handleLoadSample}
+                            className="font-medium text-[#E8503A] transition hover:text-[#D4432E]"
+                          >
+                            Load sample
+                          </button>
+                        </div>
+
+                        <div className="flex flex-wrap items-center gap-3">
+                          {items.length > 0 ? (
+                            <button
+                              type="button"
+                              onClick={handleGenerate}
+                              className="rounded-full border border-[#e2e8f0] px-5 py-3 text-[11px] font-medium uppercase tracking-[0.14em] text-[#6B7280] transition hover:border-[#E8503A]/30 hover:text-[#1A1C22]"
+                            >
+                              {inputMode === "chapter-text" ? "Re-Extract" : "Re-Validate"}
+                            </button>
+                          ) : null}
+
                           <button
                             type="button"
                             onClick={handleGenerate}
-                            className="rounded-full border border-[#e2e8f0] px-5 py-3 text-[11px] font-medium uppercase tracking-[0.14em] text-[#6B7280] transition hover:border-[#E8503A]/30 hover:text-[#1A1C22]"
+                            disabled={
+                              isExtracting ||
+                              (inputMode === "chapter-text"
+                                ? chapterText.trim().length < MIN_CHARACTERS
+                                : !structuredJson.trim().length)
+                            }
+                            className="rounded-full bg-[#E8503A] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.16em] text-white transition hover:bg-[#D4432E] disabled:cursor-not-allowed disabled:opacity-50"
                           >
-                            Re-Extract
+                            {isExtracting
+                              ? inputMode === "chapter-text"
+                                ? "Extracting..."
+                                : "Validating..."
+                              : "Generate Visuals"}
                           </button>
-                        ) : null}
-
-                        <button
-                          type="button"
-                          onClick={handleGenerate}
-                          disabled={isExtracting || chapterText.trim().length < MIN_CHARACTERS}
-                          className="rounded-full bg-[#E8503A] px-6 py-3 text-[11px] font-medium uppercase tracking-[0.16em] text-white transition hover:bg-[#D4432E] disabled:cursor-not-allowed disabled:opacity-50"
-                        >
-                          {isExtracting ? "Extracting..." : "Generate Visuals"}
-                        </button>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
-              </div>
 
               {error ? (
                 <div className="mt-5 rounded-[14px] border border-[#fecaca] bg-[#fef2f2] px-4 py-3 text-[14px] text-[#991b1b]">
@@ -522,30 +616,32 @@ export default function Home() {
             </div>
 
             <aside className="rounded-[20px] bg-[#1A1C22] p-6 text-white shadow-[0_25px_60px_rgba(26,28,34,0.18)]">
-              <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#9CA3AF]">
-                Generation status
-              </div>
-              <div className="mt-4 text-[28px] leading-none" style={{ fontFamily: "var(--font-heading)" }}>
-                {isExtracting ? "Pass 1" : isRenderingBatch ? "Pass 2" : items.length ? "Ready" : "Waiting"}
-              </div>
-              <p className="mt-4 text-[14px] leading-7 text-[#d1d5db]">{helperText}</p>
+                <div className="text-[11px] font-medium uppercase tracking-[0.18em] text-[#9CA3AF]">
+                  Generation status
+                </div>
+                <div className="mt-4 text-[28px] leading-none" style={{ fontFamily: "var(--font-heading)" }}>
+                  {isExtracting ? "Pass 1" : isRenderingBatch ? "Pass 2" : items.length ? "Ready" : "Waiting"}
+                </div>
+                <p className="mt-4 text-[14px] leading-7 text-[#d1d5db]">{helperText}</p>
 
-              <div className="mt-8 space-y-4 border-t border-white/10 pt-6">
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Visual rules</div>
-                  <div className="mt-2 text-[14px] leading-7 text-white">
-                    Scorecards stay deterministic. Everything else is AI-rendered as self-contained
-                    HTML and copied as crisp PNGs.
+                <div className="mt-8 space-y-4 border-t border-white/10 pt-6">
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Visual rules</div>
+                    <div className="mt-2 text-[14px] leading-7 text-white">
+                      The builder renders visuals only. Upstream owns scoring, while this app
+                      validates input and turns it into copy-ready outputs.
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Input limits</div>
-                  <div className="mt-2 text-[14px] leading-7 text-white">
-                    Minimum {MIN_CHARACTERS} characters. Maximum {MAX_CHARACTERS.toLocaleString()}.
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Input limits</div>
+                    <div className="mt-2 text-[14px] leading-7 text-white">
+                      {inputMode === "chapter-text"
+                        ? `Minimum ${MIN_CHARACTERS} characters. Maximum ${MAX_CHARACTERS.toLocaleString()}.`
+                        : 'Accepts a root JSON object with "risk_matrix" and/or "strategic_fit_scalability".'}
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Copy mode</div>
+                  <div>
+                    <div className="text-[11px] uppercase tracking-[0.14em] text-[#9CA3AF]">Copy mode</div>
                   <div className="mt-2 text-[14px] leading-7 text-white">
                     PNG is the default path. HTML copy is available when the editor can accept rich
                     markup directly.
@@ -561,7 +657,9 @@ export default function Home() {
             <div className="mx-auto max-w-7xl">
               <div className="mb-8 flex items-center gap-3 text-[14px] text-[#6B7280]">
                 <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-[#E8503A] border-t-transparent" />
-                Analysing chapter and extracting visual data...
+                {inputMode === "chapter-text"
+                  ? "Analysing chapter and extracting visual data..."
+                  : "Cleaning, validating, and preparing structured visual data..."}
               </div>
 
               <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
@@ -592,6 +690,7 @@ export default function Home() {
             onRegenerateAll={handleRegenerateAll}
             onReExtract={handleGenerate}
             isRenderingBatch={isRenderingBatch}
+            reExtractLabel={inputMode === "chapter-text" ? "Re-Extract" : "Re-Validate"}
           />
         ) : null}
       </main>

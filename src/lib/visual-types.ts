@@ -132,6 +132,25 @@ export interface RiskMatrixData {
   }>;
 }
 
+export interface UpstreamRiskMatrixRisk {
+  id: string;
+  label: string;
+  probability: "Low" | "Medium" | "High";
+  severity: "Low" | "Medium" | "High";
+  mitigation?: string;
+  source_chapter?: string;
+}
+
+export interface UpstreamRiskMatrixPayload {
+  visual_type?: "risk_matrix";
+  title: string;
+  caption?: string;
+  insight?: string;
+  data: {
+    risks: UpstreamRiskMatrixRisk[];
+  };
+}
+
 export interface FlowDiagramData {
   steps: Array<{
     label: string;
@@ -198,6 +217,58 @@ export interface TwoByTwoData {
     bottomLeft: string;
     bottomRight: string;
   };
+}
+
+export interface StrategicFitBreakdown {
+  customer_demand_alignment: number;
+  market_structure_fit: number;
+  regulatory_alignment: number;
+  competitive_positioning: number;
+  commercial_dynamics_fit: number;
+  technology_capability: number;
+  talent_alignment: number;
+}
+
+export interface ScalabilityBreakdown {
+  unit_economics: number;
+  market_size_ceiling: number;
+  operational_leverage: number;
+  geographic_expandability: number;
+  network_effects_potential: number;
+}
+
+export interface UpstreamTwoByTwoItem {
+  label: string;
+  x: number;
+  y: number;
+  size?: number;
+  color?: string;
+}
+
+export interface UpstreamStrategicFitScalabilityPayload {
+  visual_type?: "two_by_two";
+  title: string;
+  caption?: string;
+  insight?: string;
+  data: TwoByTwoData & {
+    scoring_rationale?: {
+      strategic_fit: {
+        score: number;
+        breakdown: StrategicFitBreakdown;
+        summary: string;
+      };
+      scalability: {
+        score: number;
+        breakdown: ScalabilityBreakdown;
+        summary: string;
+      };
+    };
+  };
+}
+
+export interface StructuredVisualInputPayload {
+  risk_matrix?: UpstreamRiskMatrixPayload;
+  strategic_fit_scalability?: UpstreamStrategicFitScalabilityPayload;
 }
 
 export interface LayeredDiagramData {

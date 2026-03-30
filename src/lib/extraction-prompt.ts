@@ -184,6 +184,7 @@ Rules:
 - Every visual must map to a chapter section.
 - Prioritise concrete numbers, comparisons, sequences, bottlenecks, and decisions.
 - Do not fabricate missing values.
+- Note: risk_matrix and two_by_two can also enter the app through direct structured JSON. This extraction flow should still infer them from prose chapter text when the user is using chapter-based extraction.
 - Use ids v1, v2, v3 and so on.
 - Use the provided color palette when a schema requires colors:
   #0f172a, #1e293b, #334155, #2563eb, #0ea5e9, #059669, #d97706, #dc2626, #64748b, #e2e8f0`;

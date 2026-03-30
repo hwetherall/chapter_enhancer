@@ -4,7 +4,8 @@
       "Bash(cd:*)",
       "Read(//c/Users/hweth/OneDrive/Desktop/Innovera/Rapid Prototyping/**)",
       "Bash(npx create-next-app@latest image_builder_temp --typescript --tailwind --eslint --app --src-dir --no-import-alias --use-npm)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(npx tsc:*)"
     ]
   }
 }

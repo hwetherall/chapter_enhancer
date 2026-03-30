@@ -54,3 +54,99 @@ Key Takeaways: The opportunity addresses a genuine $3,500 per unit pain point in
 
 Risks and Next Steps: Risk 1: no commercial validation exists, probability high, severity high. Mitigation: secure 3 paid LOIs within 90 days. Risk 2: AppFolio's AI acquisition accelerates the competitive timeline, probability medium, severity high. Mitigation: focus on building predictive data advantage with early customers. Risk 3: customer acquisition costs exceed the $4,500 per account target, probability medium, severity medium. Mitigation: establish property management association partnerships. Risk 4: integration complexity delays time to market, probability low, severity high. Mitigation: prioritise a QuickBooks connector for launch and defer Sage.`,
 };
+
+export const STRUCTURED_JSON_SAMPLE = `{
+  "risk_matrix": {
+    "visual_type": "risk_matrix",
+    "title": "Key Risks - Executive Summary",
+    "caption": "Top risks aggregated across Opportunity Validation, Market Research, and Competitive Analysis",
+    "insight": "Two risks sit in the high-severity column, with commercial validation remaining the clearest gating issue before pilot approval.",
+    "data": {
+      "risks": [
+        {
+          "id": "1",
+          "label": "No commercial validation exists",
+          "probability": "High",
+          "severity": "High",
+          "mitigation": "Secure 3 paid LOIs within 90 days",
+          "source_chapter": "Opportunity Validation"
+        },
+        {
+          "id": "2",
+          "label": "AppFolio AI timeline compresses",
+          "probability": "Medium",
+          "severity": "High",
+          "mitigation": "Build predictive data advantage with early customers",
+          "source_chapter": "Competitive Analysis"
+        },
+        {
+          "id": "3",
+          "label": "CAC exceeds $4.5k target",
+          "probability": "Medium",
+          "severity": "Medium",
+          "mitigation": "Establish channel partnerships with PM associations",
+          "source_chapter": "Market Research"
+        }
+      ]
+    }
+  },
+  "strategic_fit_scalability": {
+    "visual_type": "two_by_two",
+    "title": "Strategic Fit vs Scalability",
+    "caption": "Opportunity positioning based on upstream scoring",
+    "insight": "The opportunity lands in Niche Play: strategic alignment is strong, but scaling is constrained until validation and operating leverage improve.",
+    "data": {
+      "xAxis": {
+        "label": "Strategic Fit",
+        "lowLabel": "Weak Fit",
+        "highLabel": "Strong Fit"
+      },
+      "yAxis": {
+        "label": "Scalability",
+        "lowLabel": "Constrained",
+        "highLabel": "Highly Scalable"
+      },
+      "items": [
+        {
+          "label": "PropMgmt Software",
+          "x": 70,
+          "y": 30,
+          "size": 20,
+          "color": "#2563eb"
+        }
+      ],
+      "quadrantLabels": {
+        "topLeft": "Pivot Candidate",
+        "topRight": "Ideal",
+        "bottomLeft": "Pass",
+        "bottomRight": "Niche Play"
+      },
+      "scoring_rationale": {
+        "strategic_fit": {
+          "score": 7,
+          "breakdown": {
+            "customer_demand_alignment": 6,
+            "market_structure_fit": 8,
+            "regulatory_alignment": 8,
+            "competitive_positioning": 6,
+            "commercial_dynamics_fit": 8,
+            "technology_capability": 7,
+            "talent_alignment": 6
+          },
+          "summary": "Strong market and regulatory alignment offset by unvalidated commercial demand and moderate talent gaps."
+        },
+        "scalability": {
+          "score": 3,
+          "breakdown": {
+            "unit_economics": 4,
+            "market_size_ceiling": 7,
+            "operational_leverage": 2,
+            "geographic_expandability": 2,
+            "network_effects_potential": 3
+          },
+          "summary": "Large addressable market but constrained by high CAC, integration complexity, and the need for localised operations."
+        }
+      }
+    }
+  }
+}`;
